@@ -134,22 +134,28 @@ export const authConfig: NextAuthConfig = {
   trustHost: true,
   callbacks: {
     async redirect({ url, baseUrl }) {
-      const publicBase = process.env.APP_URL || process.env.AUTH_URL || process.env.NEXTAUTH_URL;
-      const cleanBase = publicBase ? publicBase.replace(/\/$/, "") : "";
+      // Must always return an ABSOLUTE url: the client (signIn with redirect:false) runs new URL(result).
+      const normalise = (v?: string) => {
+        const t = (v || "").trim().replace(/\/$/, "");
+        if (!t) return "";
+        const withProto = /^https?:\/\//i.test(t) ? t : `https://${t}`;
+        try {
+          return new URL(withProto).origin;
+        } catch {
+          return "";
+        }
+      };
+      const base = normalise(process.env.APP_URL) || normalise(process.env.AUTH_URL) || normalise(process.env.NEXTAUTH_URL) || normalise(baseUrl);
 
-      if (url.startsWith("/")) {
-        return cleanBase ? `${cleanBase}${url}` : url;
-      }
-
+      if (url.startsWith("/")) return `${base}${url}`;
       try {
         const parsed = new URL(url);
-        // If the URL has an internal container hostname or internal port like 8080
-        if (parsed.port === "8080" || !parsed.hostname.includes(".")) {
-          return cleanBase ? `${cleanBase}${parsed.pathname}${parsed.search}` : `${parsed.pathname}${parsed.search}`;
-        }
-        return url;
+        // internal container host / port → rewrite to the public origin
+        if (parsed.port === "8080" || !parsed.hostname.includes(".")) return `${base}${parsed.pathname}${parsed.search}`;
+        // only allow redirects to our own origin
+        return parsed.origin === base || parsed.origin === normalise(baseUrl) ? url : `${base}/`;
       } catch {
-        return cleanBase || baseUrl || "/";
+        return `${base}/`;
       }
     },
     async jwt({ token, user, account, profile, trigger }) {

@@ -8,8 +8,25 @@ import { getToken } from "next-auth/jwt";
  */
 const PUBLIC = [/^\/signin/, /^\/api\/auth\//, /^\/api\/health$/, /^\/api\/automation\//];
 
+const CALLBACK_COOKIES = ["authjs.callback-url", "__Secure-authjs.callback-url"];
+const validCallback = (v: string) => v.startsWith("/") || /^https?:\/\/[^/]+/i.test(v);
+
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
+
+  // A callback-url cookie without protocol (e.g. from an APP_URL without https://) makes Auth.js
+  // reject every request with "Invalid callback URL" → user bounces back to /signin. Drop it.
+  const bad = CALLBACK_COOKIES.filter((n) => {
+    const v = req.cookies.get(n)?.value;
+    return v !== undefined && !validCallback(decodeURIComponent(v));
+  });
+  if (bad.length) {
+    bad.forEach((n) => req.cookies.delete(n));
+    const res = NextResponse.next({ request: { headers: req.headers } });
+    bad.forEach((n) => res.cookies.set(n, "", { path: "/", maxAge: 0, secure: n.startsWith("__Secure-") }));
+    return res;
+  }
+
   if (PUBLIC.some((re) => re.test(pathname))) return NextResponse.next();
 
   // Detect HTTPS: check both the request protocol AND the forwarded proto

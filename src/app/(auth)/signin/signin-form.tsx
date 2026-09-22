@@ -35,19 +35,28 @@ export function SignInForm({ callbackUrl, initialError, reason, hasEntra }: Prop
   });
 
   const goAfterLogin = (resUrl?: string | null) => {
-    if (callbackUrl && callbackUrl.startsWith("/") && !callbackUrl.startsWith("//")) {
+    // 1. Prefer the explicit callbackUrl passed from the server page
+    if (callbackUrl && callbackUrl.startsWith("/") && !callbackUrl.startsWith("//") && !callbackUrl.startsWith("/signin")) {
       window.location.href = callbackUrl;
       return;
     }
+    // 2. Use the URL returned by NextAuth (skip if it points back to /signin)
     if (resUrl) {
       try {
         const parsed = new URL(resUrl);
-        window.location.href = parsed.port === "8080" || !parsed.hostname.includes(".") ? parsed.pathname + parsed.search : resUrl;
-        return;
+        const target = parsed.port === "8080" || !parsed.hostname.includes(".")
+          ? parsed.pathname + parsed.search
+          : resUrl;
+        // Don't redirect back to signin – that means the redirect callback looped
+        if (!target.startsWith("/signin") && !parsed.pathname.startsWith("/signin")) {
+          window.location.href = target;
+          return;
+        }
       } catch {
-        /* ignore */
+        /* ignore malformed URLs */
       }
     }
+    // 3. Fallback: go to the dashboard root
     window.location.href = "/";
   };
 
@@ -130,7 +139,9 @@ export function SignInForm({ callbackUrl, initialError, reason, hasEntra }: Prop
         callbackUrl,
       });
 
-      if (res?.error) {
+      // NextAuth v5 beta: res = { error, status, ok, url }
+      if (res?.error || res?.ok === false) {
+        console.warn("[CMR] signIn failed:", res);
         if (await checkSetupRequired(email)) {
           setMode("setup");
           setInfo("Your account needs a new password. Enter the 6-digit passcode from your administrator and choose a password.");
@@ -141,6 +152,7 @@ export function SignInForm({ callbackUrl, initialError, reason, hasEntra }: Prop
         return;
       }
 
+      console.log("[CMR] signIn success, redirecting…", { url: res?.url, callbackUrl });
       goAfterLogin(res?.url);
     } catch (err) {
       setError((err as Error).message || "An unexpected error occurred during sign-in.");

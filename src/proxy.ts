@@ -12,8 +12,25 @@ export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
   if (PUBLIC.some((re) => re.test(pathname))) return NextResponse.next();
 
-  const secureCookie = req.nextUrl.protocol === "https:";
-  const token = await getToken({ req, secret: process.env.AUTH_SECRET, secureCookie });
+  // Detect HTTPS: check both the request protocol AND the forwarded proto
+  // (Azure/Docker/reverse proxies terminate TLS upstream, so req arrives as http)
+  const isHttps =
+    req.nextUrl.protocol === "https:" ||
+    req.headers.get("x-forwarded-proto") === "https";
+  // NextAuth v5 uses "__Secure-authjs.session-token" for HTTPS, "authjs.session-token" for HTTP
+  const hasSecureCookie = req.cookies.has("__Secure-authjs.session-token");
+  const secureCookie = isHttps || hasSecureCookie;
+  const cookieName = secureCookie
+    ? "__Secure-authjs.session-token"
+    : "authjs.session-token";
+
+  const token = await getToken({
+    req,
+    secret: process.env.AUTH_SECRET,
+    secureCookie,
+    cookieName,
+    salt: cookieName,
+  });
   if (token) return NextResponse.next();
 
   if (pathname.startsWith("/api/")) {

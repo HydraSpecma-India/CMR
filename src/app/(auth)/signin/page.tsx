@@ -11,7 +11,9 @@ export default async function SignInPage({
   searchParams: Promise<{ callbackUrl?: string; error?: string; reason?: string }>;
 }) {
   const session = await auth();
-  const { callbackUrl = "/", error, reason } = await searchParams;
+  const { callbackUrl: rawCallback = "/", error, reason } = await searchParams;
+  // Sanitize: never redirect back to /signin (prevents loops from bookmarks/session timeout)
+  const callbackUrl = rawCallback.startsWith("/signin") ? "/" : rawCallback;
   if (session?.user?.email && session.user.id) redirect(callbackUrl);
 
   return (

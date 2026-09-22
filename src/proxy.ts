@@ -22,7 +22,8 @@ export async function proxy(req: NextRequest) {
   const forwardHost = req.headers.get("x-forwarded-host") || req.headers.get("host") || "";
   const forwardProto = req.headers.get("x-forwarded-proto") || "https";
   const isInternalHost = forwardHost.includes(":8080") || !forwardHost.includes(".");
-  const publicBase = process.env.APP_URL || process.env.AUTH_URL || process.env.NEXTAUTH_URL;
+  const rawBase = (process.env.APP_URL || process.env.AUTH_URL || process.env.NEXTAUTH_URL || "").trim();
+  const publicBase = rawBase ? (/^https?:\/\//i.test(rawBase) ? rawBase : `https://${rawBase}`) : "";
   const base = (!isInternalHost && forwardHost) ? `${forwardProto}://${forwardHost}` : (publicBase || req.url);
 
   const url = new URL("/signin", base);

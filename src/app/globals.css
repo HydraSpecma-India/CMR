@@ -1,0 +1,45 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", Consolas, Menlo, monospace;
+
+  --color-brand-50: #fff8e6;
+  --color-brand-100: #ffefc2;
+  --color-brand-400: #f2b705;
+  --color-brand-500: #e0a800;
+  --color-brand-600: #b88700;
+  --color-brand-200: #ffe08a;
+  --color-brand-300: #f7cc4a;
+  --color-brand-700: #8a6500;
+  --color-brand-800: #6b4e00;
+  --color-brand-900: #4d3800;
+
+  --color-ink-900: #0f172a;
+  --color-ink-800: #1e293b;
+  --color-ink-700: #334155;
+  --color-ink-600: #475569;
+  --color-ink-500: #64748b;
+  --color-ink-400: #94a3b8;
+  --color-ink-300: #cbd5e1;
+  --color-ink-200: #e2e8f0;
+  --color-ink-100: #f1f5f9;
+  --color-ink-50: #f8fafc;
+}
+
+html, body { height: 100%; }
+body { background: var(--color-ink-100); color: var(--color-ink-900); font-family: var(--font-sans); font-size: 14px; }
+
+* { scrollbar-width: thin; scrollbar-color: var(--color-ink-300) transparent; }
+
+.designer-canvas-wrap { background-color: #dfe3ea; background-image: radial-gradient(#c7ccd6 0.8px, transparent 0.8px); background-size: 16px 16px; }
+
+input[type="number"]::-webkit-inner-spin-button { opacity: 0.6; }
+
+/* Mobile comfort: avoid iOS zoom on focus (inputs need >=16px) and remove tap flash */
+@media (max-width: 639px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea { font-size: 16px !important; }
+}
+* { -webkit-tap-highlight-color: transparent; }
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }

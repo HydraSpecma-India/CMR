@@ -217,7 +217,8 @@ export function AppShell({ user, d365Mode, storageMode, loginUrl, children }: Pr
         <div
           className={cn(
             "flex-1 min-h-0",
-            isDesigner || isCmrNew
+            // only the designer manages its own scrolling; every other page (incl. New CMR) scrolls here
+            isDesigner
               ? "overflow-hidden flex flex-col"
               : "overflow-y-auto overscroll-contain px-3 py-4 sm:px-6 lg:px-8 lg:py-6",
             showBottomBar && "pb-24 md:pb-6",

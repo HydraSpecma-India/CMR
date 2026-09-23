@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { Stage, Layer, Rect, Group, Transformer, Image as KImage, Line } from "react-konva";
+import { Stage, Layer, Rect, Group, Transformer, Image as KImage, Line, Text as KText } from "react-konva";
 import Konva from "konva";
 import type { KonvaEventObject } from "konva/lib/Node";
 import { useDesigner, type FieldDef } from "./store";
@@ -41,20 +41,25 @@ export function DesignerCanvas({ assetMimeTypes, onDropElement }: Props) {
   const ph = template?.page.height ?? 842;
 
   // ── background ───────────────────────────────────────────────────────────
-  const assetId = page?.background?.assetId || "00000000-0000-0000-0000-000000000001";
+  const settings = template?.settings;
+  const wm = settings?.watermark;
+  const std = Boolean(settings?.standardForm);
+  // built-in form: rendered by the server in the template's language, without heading when the watermark replaces it
+  const stdKey = `std:lang=${settings?.formLanguage ?? "de"}&noHeading=${wm?.enabled && wm.replaceHeading ? 1 : 0}`;
+  const assetId = std ? stdKey : page?.background?.assetId || "00000000-0000-0000-0000-000000000001";
   const bgPageIndex = page?.background?.pageIndex ?? pageIndex;
   const bgKey = `${assetId}:${bgPageIndex}`;
 
   useEffect(() => {
     let alive = true;
-    const mime = (page?.background && assetMimeTypes[page.background.assetId]) ? assetMimeTypes[page.background.assetId] : "application/pdf";
+    const mime = !std && page?.background && assetMimeTypes[page.background.assetId] ? assetMimeTypes[page.background.assetId] : "application/pdf";
     loadBackgroundImage(assetId, mime, bgPageIndex)
       .then((img) => alive && setBgState({ key: bgKey, img, error: null }))
       .catch((e) => alive && setBgState({ key: bgKey, img: null, error: (e as Error).message }));
     return () => {
       alive = false;
     };
-  }, [assetId, bgPageIndex, bgKey, assetMimeTypes]);
+  }, [assetId, bgPageIndex, bgKey, assetMimeTypes, std, page?.background]);
 
   const bg = bgState.key === bgKey ? bgState.img : null;
   const bgError = bgState.key === bgKey ? bgState.error : null;
@@ -222,6 +227,38 @@ export function DesignerCanvas({ assetMimeTypes, onDropElement }: Props) {
         <Layer listening={false}>
           <Rect name="page-bg" x={0} y={0} width={pw} height={ph} fill="#ffffff" />
           {bg && <KImage image={bg} x={0} y={0} width={pw} height={ph} opacity={page.background?.opacity ?? 1} />}
+          {wm?.enabled && wm.text.trim() && (() => {
+            const COPY = ["#C8102E", "#1F4E9E", "#1E7B34", "#222222"];
+            const fill = wm.color === "copy" ? COPY[pageIndex % 4] : wm.color;
+            const rad = (wm.angle * Math.PI) / 180;
+            // same shrink-to-fit as the PDF renderer (approx. bold glyph width 0.68 × size)
+            let size = wm.size;
+            const fits = (sz: number) => {
+              const w = wm.text.trim().length * sz * 0.68;
+              const h = sz * 0.72;
+              return Math.abs(w * Math.cos(rad)) + Math.abs(h * Math.sin(rad)) <= pw * 0.92 && Math.abs(w * Math.sin(rad)) + Math.abs(h * Math.cos(rad)) <= ph * 0.92;
+            };
+            while (size > 10 && !fits(size)) size -= 2;
+            const w = wm.text.trim().length * size * 0.68;
+            return (
+              <KText
+                text={wm.text.trim()}
+                x={pw / 2}
+                y={ph / 2}
+                width={w * 1.2}
+                offsetX={(w * 1.2) / 2}
+                offsetY={size * 0.5}
+                align="center"
+                fontSize={size}
+                fontStyle="bold"
+                fontFamily="Helvetica, Arial, sans-serif"
+                fill={fill}
+                opacity={wm.opacity}
+                rotation={-wm.angle}
+                listening={false}
+              />
+            );
+          })()}
           {gridLines}
         </Layer>
         <Layer ref={layerRef}>

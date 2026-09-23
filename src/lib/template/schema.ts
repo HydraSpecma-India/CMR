@@ -164,11 +164,30 @@ export const PageSchema = z.object({
 });
 export type TemplatePage = z.infer<typeof PageSchema>;
 
+/** Large diagonal text printed behind the fields on every page (e.g. "CMR"). */
+export const WatermarkSchema = z.object({
+  enabled: z.boolean().default(false),
+  text: z.string().max(40).default("CMR"),
+  /** "copy" = colour of the CMR copy (red / blue / green / black), otherwise #rrggbb */
+  color: z.string().default("copy"),
+  opacity: z.number().min(0.02).max(1).default(0.12),
+  size: z.number().min(20).max(400).default(190),
+  angle: z.number().min(-90).max(90).default(35),
+  /** remove the "CMR" heading of the built-in standard form while the watermark is shown */
+  replaceHeading: z.boolean().default(true),
+});
+export type WatermarkSettings = z.infer<typeof WatermarkSchema>;
+
 export const TemplateSettingsSchema = z.object({
   defaultFont: FontFamilySchema.default("Helvetica"),
   signatureRequired: z.boolean().default(true),
   allowDateOverride: z.boolean().default(false),
   fileNamePattern: z.string().default("{CMRNumber}.pdf"),
+  /** background is the app's built-in 24-box form (generated per language / watermark) */
+  standardForm: z.boolean().default(false),
+  /** second language of the built-in form when a CMR does not choose one */
+  formLanguage: z.enum(["de", "da", "sv"]).default("de"),
+  watermark: WatermarkSchema.prefault({}),
 });
 
 export const TemplateSchema = z.object({

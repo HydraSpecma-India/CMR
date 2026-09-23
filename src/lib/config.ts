@@ -75,6 +75,8 @@ export interface CmrDefaults {
   establishedPlace: string;
   /** Companies (dataAreaId) that issue CMRs; empty = all */
   companies: string[];
+  /** Form language per company, e.g. { "HSDK": "da" }; otherwise derived from the sender's country */
+  languageByCompany: Record<string, string>;
 }
 
 export const DEFAULT_CMR_DEFAULTS: CmrDefaults = {
@@ -86,6 +88,7 @@ export const DEFAULT_CMR_DEFAULTS: CmrDefaults = {
   toBePaidBy: "",
   establishedPlace: "",
   companies: [],
+  languageByCompany: {},
 };
 
 export const DEFAULT_TEAMS_WEBHOOK_URL = "";

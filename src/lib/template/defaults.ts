@@ -14,7 +14,15 @@ export function emptyTemplate(name: string, templateType = "CMR"): TemplateJson 
     templateType,
     version: 1,
     page: { size: "A4", orientation: "portrait", width: A4.width, height: A4.height },
-    settings: { defaultFont: "Helvetica", signatureRequired: true, allowDateOverride: false, fileNamePattern: "{CMRNumber}.pdf" },
+    settings: {
+      defaultFont: "Helvetica",
+      signatureRequired: true,
+      allowDateOverride: false,
+      fileNamePattern: "{CMRNumber}.pdf",
+      standardForm: false,
+      formLanguage: "de",
+      watermark: { enabled: false, text: "CMR", color: "copy", opacity: 0.12, size: 190, angle: 35, replaceHeading: true },
+    },
     fonts: [],
     pages: [emptyPage("Page 1")],
   };

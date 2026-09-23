@@ -6,7 +6,13 @@ import { ALL_SLOTS, CMR_COPIES } from "@/lib/cmr/layout";
  * four copies. Every element is an ordinary template element – the admin can move,
  * restyle or delete it in the designer, or swap the background for a scanned form.
  */
-export function buildCmrSeed(backgroundAssetId: string | null, name = "Standard CMR consignment note"): TemplateJson {
+export function buildCmrSeed(
+  backgroundAssetId: string | null,
+  name = "Standard CMR consignment note",
+  opts: { standardForm?: boolean } = {},
+): TemplateJson {
+  // the built-in form is the background unless an uploaded (pre-printed) form is used
+  const standardForm = opts.standardForm ?? true;
   const pages = CMR_COPIES.map((copy, pageIndex) => {
     const elements: TemplateElement[] = ALL_SLOTS().map((s) => {
       const id = `p${pageIndex + 1}-${s.field}`;
@@ -53,7 +59,7 @@ export function buildCmrSeed(backgroundAssetId: string | null, name = "Standard 
     version: 1,
     revision: "UNECE 1956",
     page: { size: "A4", orientation: "portrait", width: 595.28, height: 841.89 },
-    settings: { defaultFont: "Helvetica", signatureRequired: true, allowDateOverride: true, fileNamePattern: "{CMRNumber}.pdf" },
+    settings: { defaultFont: "Helvetica", signatureRequired: true, allowDateOverride: true, fileNamePattern: "{CMRNumber}.pdf", standardForm },
     fonts: [],
     pages,
   });

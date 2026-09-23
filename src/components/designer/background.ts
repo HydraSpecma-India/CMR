@@ -42,7 +42,8 @@ export function loadBackgroundImage(assetId: string, mimeType: string, pageIndex
   if (hit) return hit;
 
   const p = (async () => {
-    let url = `/api/assets/${assetId}`;
+    // "std:<query>" = the app's built-in CMR form, generated per language / heading option
+    let url = assetId.startsWith("std:") ? `/api/templates/standard-form?${assetId.slice(4)}` : `/api/assets/${assetId}`;
     if (
       assetId === "00000000-0000-0000-0000-000000000001" ||
       assetId === "builtin-hydraspecma" ||

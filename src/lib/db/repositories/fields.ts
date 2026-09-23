@@ -155,10 +155,16 @@ export async function upsertD365Mapping(input: {
       transform: input.transform || "none",
       active: input.active !== undefined ? input.active : true,
       updated_at: new Date().toISOString(),
-    })
+    }, { onConflict: "field_id" })
     .select("*, field:cmr_field_definitions(*)")
     .single();
   if (error) throw error;
   invalidateMappingsCache();
   return data as D365MappingRow;
+}
+
+export async function deleteD365Mapping(id: string): Promise<void> {
+  const { error } = await supabaseAdmin().from("cmr_d365_field_mappings").delete().eq("id", id);
+  if (error) throw error;
+  invalidateMappingsCache();
 }

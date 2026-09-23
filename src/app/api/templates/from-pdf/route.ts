@@ -63,7 +63,7 @@ export const POST = route(async (req) => {
 
   // Standard CMR field layout on top of the uploaded (pre-printed) form. One page per copy:
   // a 4-page PDF maps page n → copy n, a 1-page PDF is reused for all 4 copies.
-  const seed = buildCmrSeed(asset.id, name);
+  const seed = buildCmrSeed(asset.id, name, { standardForm: false });
   const templateJson = parseTemplate({
     ...seed,
     revision,

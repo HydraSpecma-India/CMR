@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { ArrowLeft, Save, Undo2, Redo2, ZoomIn, ZoomOut, Maximize, Upload, Grid3X3, Magnet, AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignCenterVertical, AlignEndVertical, AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter, Rocket, Lock, Type, Minus, ClipboardList } from "lucide-react";
 import { useDesigner } from "./store";
+import { safeParseTemplate } from "@/lib/template/schema";
 import type { FieldDef } from "./store";
 import { ElementPalette } from "./ElementPalette";
 import { PropertiesPanel } from "./PropertiesPanel";
@@ -57,9 +58,17 @@ export function Designer(props: Props) {
   );
 
   useEffect(() => {
-    init(props.initial, readOnly);
+    // fill defaults of newer settings (watermark, language, standard form) for older template versions
+    const parsed = safeParseTemplate(props.initial);
+    const t = (parsed.success ? parsed.data : props.initial) as typeof props.initial;
+    const raw = props.initial as { settings?: { standardForm?: boolean } };
+    if (parsed.success && raw.settings?.standardForm === undefined) {
+      const stdIds = new Set(props.assets.filter((a) => a.file_name === "CMR-standard-form-4-copies.pdf").map((a) => a.id));
+      parsed.data.settings.standardForm = parsed.data.pages.some((p) => p.background && stdIds.has(p.background.assetId));
+    }
+    init(t, readOnly);
     setFields(props.fields);
-  }, [props.initial, props.fields, readOnly, init, setFields]);
+  }, [props.initial, props.fields, props.assets, readOnly, init, setFields]);
 
   // fit to width on mount
   useEffect(() => {

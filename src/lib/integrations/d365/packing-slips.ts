@@ -5,6 +5,9 @@ import { AppError } from "@/lib/errors";
 import { D365Service, type D365Config } from "./service";
 import type { CmrGoodsLine, CmrPrefill, PackingSlipSummary, ValueSource } from "@/lib/cmr/types";
 import { fmt, goodsToValues, num } from "@/lib/cmr/goods";
+import { isFormLang, langForCountry } from "@/lib/cmr/i18n";
+import { GOODS_COLUMN_PROP, GOODS_FIELD_RE, MAPPING_SOURCES, resolveSourceKey } from "@/lib/cmr/mapping-sources";
+import { listD365Mappings, type D365MappingRow } from "@/lib/db/repositories/fields";
 import { MOCK_PACKING_SLIPS, type MockPackingSlip } from "./mock-packing-slips";
 
 /**
@@ -233,10 +236,105 @@ export async function getPackingSlipPrefill(opts: { company: string; packingSlip
   const live = isLive(cfg.d365);
   const src = live ? await loadLive(cfg.d365, opts.company, opts.packingSlipId, opts.salesOrder) : loadMock(opts.company, opts.packingSlipId);
   if (!src) return null;
-  return buildPrefill(src, cfg.cmr, live ? "live" : "mock", opts.userName);
+  let mappings: D365MappingRow[] = [];
+  try {
+    mappings = (await listD365Mappings()).filter((m) => m.active && m.field?.field_name && m.property);
+  } catch (e) {
+    logger.warn("D365 field mappings could not be loaded – built-in mapping only", { error: (e as Error).message });
+  }
+  return buildPrefill(src, cfg.cmr, live ? "live" : "mock", opts.userName, mappings, cfg.d365);
 }
 
-function buildPrefill(src: Source, defaults: CmrDefaults, mode: "mock" | "live", userName?: string): CmrPrefill {
+/* ───────────────────────── admin field mappings (Admin → D365FO Field Mapping) ───────────────────────── */
+
+function readProp(row: Row | null | undefined, property: string, path?: string | null): string {
+  if (!row) return "";
+  let cur: unknown = row;
+  for (const part of [property, ...(path ? path.split(".") : [])].filter(Boolean)) {
+    if (cur && typeof cur === "object") cur = (cur as Record<string, unknown>)[part];
+    else return "";
+  }
+  if (cur === null || cur === undefined) return "";
+  return typeof cur === "object" ? JSON.stringify(cur) : String(cur);
+}
+
+function transformValue(v: string, t: string | null | undefined, qty = 1): string {
+  switch (t) {
+    case "trim":
+      return v.trim();
+    case "uppercase":
+      return v.toUpperCase();
+    case "date_iso":
+      return dateOnly(v);
+    case "number":
+      return num(v) ? fmt(num(v), 3) : "";
+    case "multiply_qty":
+      return num(v) ? fmt(num(v) * qty, 3) : "";
+    default:
+      return v;
+  }
+}
+
+function applyMappings(
+  src: Source,
+  mappings: D365MappingRow[],
+  d365: D365Config | undefined,
+  values: Record<string, string>,
+  sources: Record<string, ValueSource>,
+  goods: CmrGoodsLine[],
+  warnings: string[],
+) {
+  const names = (d365 ?? {}) as Partial<Record<string, string>>;
+  const records: Record<string, Row | null> = {
+    header: src.header,
+    salesOrder: src.salesOrder,
+    customer: src.customer,
+    legalEntity: src.legalEntity,
+    warehouse: src.warehouse,
+    carrier: src.carrier,
+    invoice: src.invoice,
+  };
+  for (const m of mappings) {
+    const field = m.field!.field_name;
+    const key = resolveSourceKey(m.entity, names);
+    if (!key) {
+      warnings.push(`Mapping for ${field}: entity "${m.entity}" is not one of the loaded D365 records – ignored.`);
+      continue;
+    }
+    const goodsCol = GOODS_FIELD_RE.exec(field)?.[1] as keyof typeof GOODS_COLUMN_PROP | undefined;
+    if (goodsCol) {
+      // column mapping → every goods line
+      const prop = GOODS_COLUMN_PROP[goodsCol];
+      src.lines.forEach((l, i) => {
+        if (!goods[i]) return;
+        const item = pick(l, ["ItemId", "ItemNumber"]);
+        const row = key === "line" ? l : key === "product" ? src.products[item] : records[key];
+        const qty = num(pick(l, ["Qty", "Quantity", "DeliveredQuantity", "InventQty"])) || 1;
+        const v = transformValue(readProp(row, m.property, m.path), m.transform, qty);
+        if (v) goods[i][prop] = v;
+      });
+      continue;
+    }
+    if (key === "line" || key === "product") {
+      warnings.push(`Mapping for ${field}: line/product records can only fill goods columns (boxes 6–12).`);
+      continue;
+    }
+    const v = transformValue(readProp(records[key], m.property, m.path), m.transform);
+    if (v) {
+      values[field] = v;
+      sources[field] = "D365";
+    }
+  }
+}
+
+function buildPrefill(
+  src: Source,
+  defaults: CmrDefaults,
+  mode: "mock" | "live",
+  userName?: string,
+  mappings: D365MappingRow[] = [],
+  d365?: D365Config,
+): CmrPrefill {
   const values: Record<string, string> = {};
   const sources: Record<string, ValueSource> = {};
   const warnings: string[] = [];
@@ -320,6 +418,11 @@ function buildPrefill(src: Source, defaults: CmrDefaults, mode: "mock" | "live",
   set("EstablishedDate", new Date().toISOString().slice(0, 10), "SYSTEM");
   set("SenderSignatoryName", userName ?? "", "SYSTEM");
 
+  // Form language (second language next to English on the built-in form)
+  const byCompany = (defaults.languageByCompany ?? {})[summary.company];
+  if (isFormLang(byCompany)) set("FormLanguage", byCompany, "SETTING");
+  else set("FormLanguage", langForCountry(leAddr.country), leAddr.country ? "D365" : "SYSTEM");
+
   // Boxes 6–12 – goods
   const goods: CmrGoodsLine[] = src.lines.map((l) => {
     const item = pick(l, ["ItemId", "ItemNumber"]);
@@ -348,6 +451,9 @@ function buildPrefill(src: Source, defaults: CmrDefaults, mode: "mock" | "live",
       volume: vol ? fmt(vol * qty, 3) : "",
     };
   });
+  // admin mappings override the built-in mapping (fields and goods columns)
+  if (mappings.length) applyMappings(src, mappings, d365, values, sources, goods, warnings);
+
   if (!goods.length) warnings.push("No packing slip lines were returned – add the goods manually.");
   const missingWeight = goods.filter((g) => !g.grossWeight).map((g) => g.itemNumber).filter(Boolean);
   if (missingWeight.length) warnings.push(`No gross/net weight on released product(s) ${missingWeight.join(", ")} – enter the weight (box 11).`);
@@ -373,28 +479,23 @@ function buildPrefill(src: Source, defaults: CmrDefaults, mode: "mock" | "live",
 }
 
 /** Admin diagnostics – returns the property names of the first record of each configured entity. */
-export async function probeEntities(company: string): Promise<Array<{ key: string; entity: string; ok: boolean; count: number; fields: string[]; error?: string }>> {
+export async function probeEntities(company: string): Promise<Array<{ key: string; label: string; entity: string; ok: boolean; count: number; fields: string[]; error?: string }>> {
   const { d365 } = await getActiveConfig();
   if (!isLive(d365)) return [];
   const area = company && company !== "ALL" ? `dataAreaId eq '${esc(company.toLowerCase())}'` : undefined;
-  const list: Array<[string, string, string | undefined]> = [
-    ["Packing slip header", d365.packingSlipHeaderEntity, area],
-    ["Packing slip lines", d365.packingSlipLineEntity, area],
-    ["Sales order header", d365.salesOrderEntity, area],
-    ["Customer", d365.customerEntity, area],
-    ["Legal entity", d365.legalEntityEntity, undefined],
-    ["Warehouse", d365.warehouseEntity, area],
-    ["Released product", d365.productEntity, area],
-    ["Shipping carrier", d365.carrierEntity, area],
-    ["Sales invoice", d365.invoiceEntity, area],
-  ];
+  const list: Array<[string, string, string, string | undefined]> = MAPPING_SOURCES.map((m) => [
+    m.key,
+    m.label,
+    d365[m.configKey],
+    m.key === "legalEntity" ? undefined : area,
+  ]);
   return Promise.all(
-    list.map(async ([key, entity, filter]) => {
+    list.map(async ([key, label, entity, filter]) => {
       try {
         const rows = await odata(d365, entity, { filter, top: 1 });
-        return { key, entity, ok: true, count: rows.length, fields: rows[0] ? Object.keys(rows[0]).filter((k) => !k.startsWith("@")) : [] };
+        return { key, label, entity, ok: true, count: rows.length, fields: rows[0] ? Object.keys(rows[0]).filter((k) => !k.startsWith("@")).sort() : [] };
       } catch (e) {
-        return { key, entity, ok: false, count: 0, fields: [], error: (e as Error).message };
+        return { key, label, entity, ok: false, count: 0, fields: [], error: (e as Error).message };
       }
     }),
   );

@@ -17,6 +17,7 @@ import {
   CMR_COPIES, REQUIRED_FIELDS, WIZARD_SECTIONS, isCheckboxField, isMultilineField, labelFor,
 } from "@/lib/cmr/layout";
 import { emptyGoodsLine, fmt, goodsTotals, num } from "@/lib/cmr/goods";
+import { FORM_LANGUAGES } from "@/lib/cmr/i18n";
 import type { CmrGoodsLine, CmrPrefill, PackingSlipSummary, ValueSource } from "@/lib/cmr/types";
 
 type Prefill = Omit<CmrPrefill, "context">;
@@ -381,9 +382,26 @@ export function CmrWizard(props: {
                     {templateName ? ` · layout “${templateName}”` : " · built-in standard CMR layout"}
                   </div>
                 </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="flex items-center gap-2 text-xs font-medium text-ink-700">
+                    Form language
+                    <Select
+                      className="h-8 w-56 text-xs"
+                      value={values.FormLanguage || "de"}
+                      onChange={(e) => {
+                        setValue("FormLanguage", e.target.value);
+                        setPreviewUrl(null);
+                      }}
+                    >
+                      {FORM_LANGUAGES.map((l) => (
+                        <option key={l.code} value={l.code}>{l.label}</option>
+                      ))}
+                    </Select>
+                  </label>
                 <Button variant="outline" size="sm" onClick={() => setStep(1)}>
                   <ArrowLeft className="h-4 w-4" /> Other packing slip
                 </Button>
+                </div>
               </CardBody>
             </Card>
 

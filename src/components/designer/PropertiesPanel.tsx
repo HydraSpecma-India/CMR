@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { Bold, Italic, Underline, AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignCenterVertical, AlignEndVertical, Lock, Unlock, Eye, EyeOff, Trash2, Copy, ArrowUpToLine, ArrowDownToLine, Upload, Plus, Minus } from "lucide-react";
+import { FORM_LANGUAGES } from "@/lib/cmr/i18n";
 import { useDesigner, useSelectedElements } from "./store";
 import type { TemplateElement, TextStyle } from "@/lib/template/schema";
 import { cn } from "@/lib/utils/cn";
@@ -490,6 +491,8 @@ function TemplateProperties() {
   const pageIndex = useDesigner((s) => s.pageIndex);
   const { updateSettings, updateTemplateMeta, commit } = useDesigner.getState();
   if (!template) return null;
+  const wmDefaults = { enabled: false, text: "CMR", color: "copy", opacity: 0.12, size: 190, angle: 35, replaceHeading: true };
+  const setWm = (patch: Partial<typeof wmDefaults>) => updateSettings({ watermark: { ...wmDefaults, ...template.settings.watermark, ...patch } });
   const page = template.pages[pageIndex];
   return (
     <aside className="w-72 shrink-0 overflow-y-auto border-l border-ink-200 bg-white">
@@ -507,6 +510,60 @@ function TemplateProperties() {
         <Chk label="Allow date override" checked={template.settings.allowDateOverride} onChange={(v) => updateSettings({ allowDateOverride: v })} />
         <Sel label="Default font" value={template.settings.defaultFont} onChange={(v) => updateSettings({ defaultFont: v })} options={FONTS.map((f) => ({ value: f, label: f }))} />
         <Txt label="File name pattern" value={template.settings.fileNamePattern} onChange={(v) => updateSettings({ fileNamePattern: v })} placeholder="{CMRNumber}.pdf" />
+      </Section>
+      <Section title="CMR form & language">
+        <Chk
+          label="Use built-in standard CMR form"
+          checked={Boolean(template.settings.standardForm)}
+          onChange={(v) => updateSettings({ standardForm: v })}
+        />
+        <p className="text-[10px] text-ink-400">
+          The app draws the 24-box form itself, so the second language and the watermark option apply. Switch off to print on an uploaded / pre-printed form.
+        </p>
+        <Sel
+          label="Form language"
+          value={template.settings.formLanguage ?? "de"}
+          onChange={(v) => updateSettings({ formLanguage: v as "de" | "da" | "sv" })}
+          options={FORM_LANGUAGES.map((l) => ({ value: l.code, label: l.label }))}
+        />
+        <p className="text-[10px] text-ink-400">Default only – every CMR can choose English/German, Danish or Swedish in the wizard.</p>
+      </Section>
+      <Section title="Watermark">
+        <Chk
+          label="Enable watermark"
+          checked={Boolean(template.settings.watermark?.enabled)}
+          onChange={(v) => updateSettings({ watermark: { ...wmDefaults, ...template.settings.watermark, enabled: v } })}
+        />
+        {template.settings.watermark?.enabled && (
+          <>
+            <Txt label="Text" value={template.settings.watermark.text} onChange={(v) => setWm({ text: v })} placeholder="CMR" />
+            <Chk
+              label="Replace the “CMR” heading"
+              checked={template.settings.watermark.replaceHeading}
+              onChange={(v) => setWm({ replaceHeading: v })}
+            />
+            <Sel
+              label="Colour"
+              value={template.settings.watermark.color === "copy" ? "copy" : "custom"}
+              onChange={(v) => setWm({ color: v === "copy" ? "copy" : "#000000" })}
+              options={[
+                { value: "copy", label: "Colour of each copy" },
+                { value: "custom", label: "Custom colour" },
+              ]}
+            />
+            {template.settings.watermark.color !== "copy" && (
+              <Color label="Custom" value={template.settings.watermark.color} onChange={(v) => setWm({ color: v || "#000000" })} />
+            )}
+            <div className="grid grid-cols-2 gap-2">
+              <Num label="Opacity" value={template.settings.watermark.opacity} onChange={(v) => setWm({ opacity: Math.min(1, Math.max(0.02, v)) })} step={0.02} min={0.02} max={1} />
+              <Num label="Angle" value={template.settings.watermark.angle} onChange={(v) => setWm({ angle: Math.min(90, Math.max(-90, v)) })} step={5} min={-90} max={90} suffix="°" />
+            </div>
+            <Num label="Size" value={template.settings.watermark.size} onChange={(v) => setWm({ size: Math.min(400, Math.max(20, v)) })} step={10} min={20} max={400} suffix="pt" />
+            <p className="text-[10px] text-ink-400">
+              Printed behind the filled-in values on every copy. “Replace the heading” removes the large CMR title of the built-in form; on an uploaded form the heading stays.
+            </p>
+          </>
+        )}
       </Section>
       <Section title={`Page ${pageIndex + 1}`}>
         <Txt label="Page name" value={page.name ?? ""} onChange={(v) => commit((t) => (t.pages[pageIndex].name = v || undefined))} />

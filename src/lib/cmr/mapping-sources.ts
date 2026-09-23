@@ -69,8 +69,10 @@ export const GOODS_COLUMN_PROP = {
   Volume: "volume",
 } as const;
 
-export function resolveSourceKey(entity: string, entityNames: Partial<Record<MappingSource["configKey"], string>>): MappingSourceKey | null {
+/** Maps a stored mapping entity to a source key: built-in key, configured entity name, or custom key (c_…). */
+export function resolveSourceKey(entity: string, entityNames: Partial<Record<MappingSource["configKey"], string>>): string | null {
   const e = (entity || "").trim();
+  if (/^c_[a-z0-9_]+$/.test(e)) return e;
   const byKey = MAPPING_SOURCES.find((s) => s.key.toLowerCase() === e.toLowerCase());
   if (byKey) return byKey.key;
   const byName = MAPPING_SOURCES.find((s) => (entityNames[s.configKey] || "").toLowerCase() === e.toLowerCase());

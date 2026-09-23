@@ -1,10 +1,10 @@
 import "server-only";
-import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
+import { PDFDocument, StandardFonts, degrees, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import {
   BOXES, CMR_COPIES, CMR_LEGAL_CLAUSE, GOODS, PAGE, TITLE_BOX, X0, X1, XM,
   adrTop, goodsBottom, totalsTop,
 } from "./layout";
-import { formTexts, type FormLang, type FormTexts } from "./i18n";
+import { MARGIN_EN, formTexts, type FormLang, type FormTexts } from "./i18n";
 
 export interface CmrFormOptions {
   companyLine?: string;
@@ -12,7 +12,12 @@ export interface CmrFormOptions {
   lang?: FormLang;
   /** leave out the large "CMR" heading (used when the template prints a CMR watermark instead) */
   hideHeading?: boolean;
+  /** print the side notes (who completes which box, ADR note) in the left / right margin – default on */
+  marginNotes?: boolean;
 }
+
+/** Boxes completed by the carrier – framed with bold lines, as on the IRU model form. */
+const CARRIER_BOXES = new Set(["16", "17", "18", "23"]);
 
 /**
  * Builds the empty, standard 24-box CMR consignment note as a 4-page vector PDF
@@ -95,7 +100,7 @@ function drawForm(
 
   // ── numbered boxes
   for (const b of BOXES) {
-    rect(b.x, b.y, b.w, b.h);
+    rect(b.x, b.y, b.w, b.h, CARRIER_BOXES.has(b.no) ? 1.9 : 0.8);
     const bw = numBadge(b.no, b.x + 2, b.y + 2);
     fitText(b.en, b.x + bw + 5, b.y + 2.5, b.w - bw - 10, 6.3, f.bold);
     fitText(tx.boxes[b.no] ?? b.de, b.x + bw + 5, b.y + 9, b.w - bw - 10, 5.2, f.italic);
@@ -156,6 +161,26 @@ function drawForm(
   fitText(`UN No. / ${tx.adrUn}`, X0 + 132, adrTop() + 5, 46, 6.5, f.bold);
   fitText(`Letter / ${tx.adrLetter}`, X0 + 252, adrTop() + 5, 46, 6.5, f.bold);
   fitText(`Description / ${tx.adrDescription}`, X0 + 336, adrTop() + 5, 62, 6.5, f.bold);
+
+  // ── margin notes (outside the frame): left = responsibilities, right = ADR
+  if (opts.marginNotes !== false) {
+    const top = 20;
+    const bottom = 780;
+    const mid = (top + bottom) / 2;
+    const maxLen = bottom - top - 10;
+    const side = (s: string, x: number, up: boolean, size: number, font: PDFFont) => {
+      let sz = size;
+      while (sz > 3.6 && font.widthOfTextAtSize(s, sz) > maxLen) sz -= 0.1;
+      const w = font.widthOfTextAtSize(s, sz);
+      // up: reads bottom → top (left margin); down: top → bottom (right margin)
+      const y = up ? Y(mid + w / 2) : Y(mid - w / 2);
+      page.drawText(s, { x, y, size: sz, font, color: ink, rotate: degrees(up ? 90 : -90) });
+    };
+    side(MARGIN_EN.left, 9.6, true, 5.4, f.bold);
+    side(tx.marginLeft, 16.2, true, 5, f.italic);
+    side(MARGIN_EN.right, X1 + 3.4, false, 5.4, f.regular);
+    side(tx.marginRight, X1 + 10, false, 5, f.italic);
+  }
 
   // ── footer band with copy colour
   page.drawRectangle({ x: X0, y: Y(806), width: X1 - X0, height: 18, color: ink });

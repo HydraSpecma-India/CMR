@@ -43,7 +43,16 @@ export interface FormTexts {
   continuation: string;
   sender: string;
   consignee: string;
+  /** left margin – who fills which boxes */
+  marginLeft: string;
+  /** right margin – ADR note */
+  marginRight: string;
 }
+
+export const MARGIN_EN = {
+  left: "To be completed on the sender's responsibility: boxes 1–15 and 19–22  ·  The spaces framed with bold lines (16–18, 23) are completed by the carrier",
+  right: "In case of dangerous goods mention, besides the possible certification, on the last line of the column the particulars of the class, the UN number and the letter, if any (ADR)",
+};
 
 const de: FormTexts = {
   subtitle: "Internationaler Frachtbrief",
@@ -65,6 +74,8 @@ const de: FormTexts = {
   continuation: "Fortsetzungsblatt",
   sender: "Absender",
   consignee: "Empfänger",
+  marginLeft: "Vom Absender auszufüllen: Felder 1–15 und 19–22  ·  Die stark umrandeten Felder (16–18, 23) füllt der Frachtführer aus",
+  marginRight: "Bei gefährlichen Gütern sind, außer der eventuellen Bescheinigung, in der letzten Zeile der Rubrik anzugeben: Klasse, UN-Nummer und gegebenenfalls Buchstabe (ADR)",
 };
 
 const da: FormTexts = {
@@ -113,6 +124,8 @@ const da: FormTexts = {
   continuation: "Fortsættelsesark",
   sender: "Afsender",
   consignee: "Modtager",
+  marginLeft: "Udfyldes på afsenderens ansvar: felt 1–15 og 19–22  ·  Felterne med fed ramme (16–18, 23) udfyldes af fragtføreren",
+  marginRight: "Ved farligt gods angives, ud over eventuel certificering, på kolonnens sidste linje klasse, UN-nummer og eventuelt bogstav (ADR)",
 };
 
 const sv: FormTexts = {
@@ -161,6 +174,8 @@ const sv: FormTexts = {
   continuation: "Fortsättningsblad",
   sender: "Avsändare",
   consignee: "Mottagare",
+  marginLeft: "Ifylls på avsändarens ansvar: fält 1–15 och 19–22  ·  Fälten med fet ram (16–18, 23) ifylls av fraktföraren",
+  marginRight: "Vid farligt gods anges, utöver eventuellt intyg, på kolumnens sista rad klass, UN-nummer och i förekommande fall bokstav (ADR)",
 };
 
 const TEXTS: Record<FormLang, FormTexts> = { de, da, sv };

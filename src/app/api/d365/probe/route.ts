@@ -8,7 +8,7 @@ import { getActiveConfig } from "@/lib/config";
  * lists its property names, so the field mapping can be verified against the real D365 environment.
  */
 export const GET = route(async (req) => {
-  await requireCapability("manageSettings");
+  await requireCapability("manageFields");
   const cfg = await getActiveConfig();
   const company = (req.nextUrl.searchParams.get("company") || cfg.d365.company || "").trim().toUpperCase();
   if (cfg.d365.mode !== "live") return json({ ok: true, mode: "mock", company, results: [] });

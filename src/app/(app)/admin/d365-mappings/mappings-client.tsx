@@ -6,14 +6,17 @@ import { Alert, Badge, Button, Card, CardBody, Checkbox, Dialog, Field, Input, P
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/utils/fetcher";
 import type { D365MappingRow, FieldDefinitionRow } from "@/lib/db/repositories/fields";
-import { GOODS_FIELD_RE, MAPPING_SOURCES, TRANSFORMS, resolveSourceKey, type MappingSourceKey } from "@/lib/cmr/mapping-sources";
+import { GOODS_FIELD_RE, MAPPING_SOURCES, TRANSFORMS, resolveSourceKey } from "@/lib/cmr/mapping-sources";
+import { isPerLine, type CustomEntity } from "@/lib/cmr/custom-entities";
+import { CustomEntitiesPanel } from "./custom-entities-panel";
+import { JOIN_KEYS, builtinFor } from "@/lib/cmr/builtin-mapping";
 
 type Probe = { key: string; label: string; entity: string; ok: boolean; count: number; fields: string[]; error?: string };
 
 interface FormState {
   id?: string;
   field_id: string;
-  entity: MappingSourceKey;
+  entity: string;
   property: string;
   path: string;
   transform: string;
@@ -27,6 +30,7 @@ export function MappingsClient({
   live,
   defaultCompany,
   dbError,
+  initialCustomEntities,
 }: {
   initialMappings: D365MappingRow[];
   fields: FieldDefinitionRow[];
@@ -34,9 +38,11 @@ export function MappingsClient({
   live: boolean;
   defaultCompany: string;
   dbError: string | null;
+  initialCustomEntities: CustomEntity[];
 }) {
+  const [customEntities, setCustomEntities] = useState<CustomEntity[]>(initialCustomEntities);
   const [mappings, setMappings] = useState<D365MappingRow[]>(initialMappings);
-  const [onlyD365, setOnlyD365] = useState(true);
+  const [onlyD365, setOnlyD365] = useState(false);
   const [hideGoodsRows, setHideGoodsRows] = useState(true);
   const [q, setQ] = useState("");
   const [form, setForm] = useState<FormState | null>(null);
@@ -118,7 +124,15 @@ export function MappingsClient({
 
   const propsFor = (key: string) => probe?.find((p) => p.key === key)?.fields ?? [];
   const selectedField = form ? fields.find((f) => f.id === form.field_id) : null;
-  const sourceOptions = MAPPING_SOURCES.filter((s) => (selectedField && isGoods(selectedField.field_name) ? true : !s.perLine));
+  const goodsField = Boolean(selectedField && isGoods(selectedField.field_name));
+  const sourceOptions: { key: string; label: string; entity: string }[] = [
+    ...MAPPING_SOURCES.filter((s) => goodsField || !s.perLine).map((s) => ({ key: s.key as string, label: s.label, entity: entityNames[s.key] })),
+    ...customEntities
+      .filter((c) => goodsField || !isPerLine(c, customEntities))
+      .map((c) => ({ key: c.key, label: `${c.label} (custom${isPerLine(c, customEntities) ? ", per line" : ""})`, entity: c.entity })),
+  ];
+  const sourceLabel = (key: string | null, fallback: string) =>
+    MAPPING_SOURCES.find((s) => s.key === key)?.label ?? customEntities.find((c) => c.key === key)?.label ?? fallback;
 
   return (
     <div className="w-full space-y-5 pb-16">
@@ -150,6 +164,22 @@ export function MappingsClient({
         </CardBody>
       </Card>
 
+      <details className="rounded-lg border border-ink-200 bg-white px-4 py-3 text-xs">
+        <summary className="cursor-pointer font-semibold text-ink-800">How the D365 records of a packing slip are found (tables &amp; join keys)</summary>
+        <table className="mt-2 w-full">
+          <tbody>
+            {JOIN_KEYS.map((j) => (
+              <tr key={j.record} className="border-t border-ink-100">
+                <td className="py-1 pr-3 font-medium text-ink-700">{MAPPING_SOURCES.find((s) => s.key === j.record)?.label}</td>
+                <td className="py-1 pr-3 font-mono text-ink-900">{entityNames[j.record]}</td>
+                <td className="py-1 font-mono text-ink-500">{j.key}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="mt-2 text-ink-500">All queries use cross-company=true and filter on dataAreaId. Entity names are set in Settings → D365.</p>
+      </details>
+
       {probe && (
         <Card>
           <CardBody className="grid gap-2 text-xs sm:grid-cols-2 xl:grid-cols-3">
@@ -168,6 +198,15 @@ export function MappingsClient({
         </Card>
       )}
 
+      <CustomEntitiesPanel
+        entities={customEntities}
+        onChange={setCustomEntities}
+        entityNames={entityNames}
+        live={live}
+        company={company}
+        propsFor={propsFor}
+      />
+
       <Card>
         <Table>
           <thead>
@@ -183,7 +222,6 @@ export function MappingsClient({
             {rows.map((f) => {
               const m = byField.get(f.id);
               const key = m ? resolveSourceKey(m.entity, names) : null;
-              const src = MAPPING_SOURCES.find((s) => s.key === key);
               return (
                 <tr key={f.id} className="hover:bg-ink-50">
                   <Td>
@@ -193,11 +231,13 @@ export function MappingsClient({
                       {isGoods(f.field_name) && <span className="ml-1 font-sans text-ink-400">(applies to every goods line)</span>}
                     </div>
                   </Td>
-                  <Td className="text-xs text-ink-600">{f.source_type === "D365FO" ? f.description || "Built-in D365 logic" : <Badge tone="neutral">{f.source_type}</Badge>}</Td>
+                  <Td className="text-xs text-ink-600">
+                    <BuiltinSource fieldName={f.field_name} entityNames={entityNames} fallback={f.source_type} />
+                  </Td>
                   <Td>
                     {m ? (
                       <div className="text-xs">
-                        <Badge tone="brand">{src?.label ?? m.entity}</Badge>
+                        <Badge tone="brand">{sourceLabel(key, m.entity)}</Badge>
                         <div className="mt-0.5 font-mono font-semibold text-ink-800">
                           {m.property}
                           {m.path ? `.${m.path}` : ""}
@@ -250,14 +290,17 @@ export function MappingsClient({
         {form && selectedField && (
           <div className="space-y-4">
             <p className="text-xs text-ink-500">
-              Built-in: {selectedField.description || "D365 logic in the app"}. The custom mapping replaces it; clear the value in the CMR
-              wizard if D365 is empty for a packing slip.
+              The custom mapping replaces the built-in source below. If the property is empty for a packing slip, the field stays empty and can be typed in the wizard.
             </p>
+            <div className="rounded border border-ink-200 bg-ink-50 p-2 text-xs">
+              <div className="mb-1 font-semibold text-ink-700">Built-in source</div>
+              <BuiltinSource fieldName={selectedField.field_name} entityNames={entityNames} fallback={selectedField.source_type} />
+            </div>
             <Field label="D365 record">
-              <Select value={form.entity} onChange={(e) => setForm({ ...form, entity: e.target.value as MappingSourceKey })}>
+              <Select value={form.entity} onChange={(e) => setForm({ ...form, entity: e.target.value })}>
                 {sourceOptions.map((s) => (
                   <option key={s.key} value={s.key}>
-                    {s.label} – {entityNames[s.key]}
+                    {s.label} – {s.entity}
                   </option>
                 ))}
               </Select>
@@ -297,6 +340,39 @@ export function MappingsClient({
           </div>
         )}
       </Dialog>
+    </div>
+  );
+}
+
+const RECORD_TONE: Record<string, "info" | "brand" | "neutral" | "warning"> = { setting: "brand", system: "neutral", manual: "warning" };
+
+/** Built-in source as “Entity.Field1 | Field2” lines, in the order they are tried. */
+function BuiltinSource({ fieldName, entityNames, fallback }: { fieldName: string; entityNames: Record<string, string>; fallback: string }) {
+  const rule = builtinFor(fieldName);
+  if (!rule) return <Badge tone="neutral">{fallback}</Badge>;
+  return (
+    <div className="space-y-1">
+      {rule.steps.map((st, i) => {
+        const isD365 = !["setting", "system", "manual"].includes(st.record);
+        return (
+          <div key={i} className="leading-snug">
+            {i > 0 && <span className="mr-1 text-ink-400">{rule.rule?.startsWith("first") ? "else" : "+"}</span>}
+            {isD365 ? (
+              <span className="font-mono text-[11px] font-semibold text-sky-800">{entityNames[st.record] ?? st.record}</span>
+            ) : (
+              <Badge tone={RECORD_TONE[st.record]}>{st.record === "setting" ? "Setting" : st.record === "system" ? "System" : "Manual"}</Badge>
+            )}
+            {st.fields.length > 0 && (
+              <span className="font-mono text-[11px] text-ink-800">
+                {isD365 ? "." : " "}
+                {st.fields.join(" | ")}
+              </span>
+            )}
+            {st.note && <span className="ml-1 text-ink-500">– {st.note}</span>}
+          </div>
+        );
+      })}
+      {rule.rule && !rule.rule.startsWith("first") && <div className="text-ink-500">Rule: {rule.rule}</div>}
     </div>
   );
 }

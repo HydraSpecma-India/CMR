@@ -2,12 +2,14 @@ import "server-only";
 import { getActiveConfig, type CmrDefaults } from "@/lib/config";
 import { logger } from "@/lib/logging/logger";
 import { AppError } from "@/lib/errors";
-import { D365Service, type D365Config } from "./service";
+import { type D365Config } from "./service";
+import { esc, odata, odataOne, type Row } from "./odata";
 import type { CmrGoodsLine, CmrPrefill, PackingSlipSummary, ValueSource } from "@/lib/cmr/types";
 import { fmt, goodsToValues, num } from "@/lib/cmr/goods";
 import { isFormLang, langForCountry } from "@/lib/cmr/i18n";
 import { GOODS_COLUMN_PROP, GOODS_FIELD_RE, MAPPING_SOURCES, resolveSourceKey } from "@/lib/cmr/mapping-sources";
 import { listD365Mappings, type D365MappingRow } from "@/lib/db/repositories/fields";
+import { loadCustomEntityDefs, resolveCustomEntities, type CustomRecords } from "./custom-entities";
 import { MOCK_PACKING_SLIPS, type MockPackingSlip } from "./mock-packing-slips";
 
 /**
@@ -28,9 +30,7 @@ import { MOCK_PACKING_SLIPS, type MockPackingSlip } from "./mock-packing-slips";
  * and listed as a warning in the wizard – never invented.
  */
 
-type Row = Record<string, unknown>;
 
-const esc = (v: string) => v.replace(/'/g, "''");
 
 export function pick(row: Row | null | undefined, candidates: string[]): string {
   if (!row) return "";
@@ -43,34 +43,6 @@ export function pick(row: Row | null | undefined, candidates: string[]): string 
 
 const dateOnly = (v: string) => (v ? v.slice(0, 10) : "");
 
-async function odata(cfg: D365Config, entity: string, params: { filter?: string; select?: string; top?: number; orderby?: string }): Promise<Row[]> {
-  const token = await D365Service.getAccessToken(cfg);
-  const base = cfg.baseUrl.replace(/\/+$/, "");
-  const q = new URLSearchParams();
-  q.set("cross-company", "true");
-  if (params.filter) q.set("$filter", params.filter);
-  if (params.select) q.set("$select", params.select);
-  if (params.orderby) q.set("$orderby", params.orderby);
-  q.set("$top", String(params.top ?? 50));
-  const url = `${base}/data/${entity}?${q.toString().replace(/\+/g, "%20")}`;
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: "application/json", Prefer: "odata.maxpagesize=500" }, cache: "no-store" });
-  if (!res.ok) {
-    const body = (await res.text()).slice(0, 400);
-    throw new Error(`D365 ${entity} returned ${res.status}: ${body}`);
-  }
-  const json = (await res.json()) as { value?: Row[] };
-  return json.value ?? [];
-}
-
-async function odataOne(cfg: D365Config, entity: string, filter: string): Promise<Row | null> {
-  try {
-    const rows = await odata(cfg, entity, { filter, top: 1 });
-    return rows[0] ?? null;
-  } catch (e) {
-    logger.warn("D365 lookup failed", { entity, filter, error: (e as Error).message });
-    return null;
-  }
-}
 
 /**
  * Live mode needs the complete connection. When live mode is set but something is missing we fail
@@ -139,7 +111,7 @@ function summaryFromHeader(h: Row, lineCount?: number): PackingSlipSummary {
 
 /* ───────────────────────── one packing slip → CMR prefill ───────────────────────── */
 
-interface Source {
+export interface Source {
   header: Row;
   lines: Row[];
   salesOrder: Row | null;
@@ -242,7 +214,23 @@ export async function getPackingSlipPrefill(opts: { company: string; packingSlip
   } catch (e) {
     logger.warn("D365 field mappings could not be loaded – built-in mapping only", { error: (e as Error).message });
   }
-  return buildPrefill(src, cfg.cmr, live ? "live" : "mock", opts.userName, mappings, cfg.d365);
+  // admin-defined entities + relations (Admin → D365FO Field Mapping → Custom entities)
+  let custom: CustomRecords = { header: {}, perLine: {}, warnings: [], trace: {} };
+  const defs = await loadCustomEntityDefs();
+  if (defs.some((d) => d.active)) {
+    if (live) custom = await resolveCustomEntities(cfg.d365, opts.company, src, defs);
+    else custom.warnings.push("Custom D365 entities are only read when D365 is in live mode.");
+  }
+  const prefill = buildPrefill(src, cfg.cmr, live ? "live" : "mock", opts.userName, mappings, cfg.d365, custom);
+  prefill.warnings.push(...custom.warnings);
+  return prefill;
+}
+
+/** Loads the built-in records of a packing slip (used by the custom-entity test in the admin). */
+export async function loadPackingSlipRecords(company: string, packingSlipId: string): Promise<{ live: boolean; src: Source | null }> {
+  const cfg = await getActiveConfig();
+  const live = isLive(cfg.d365);
+  return { live, src: live ? await loadLive(cfg.d365, company, packingSlipId) : loadMock(company, packingSlipId) };
 }
 
 /* ───────────────────────── admin field mappings (Admin → D365FO Field Mapping) ───────────────────────── */
@@ -283,6 +271,7 @@ function applyMappings(
   sources: Record<string, ValueSource>,
   goods: CmrGoodsLine[],
   warnings: string[],
+  custom?: CustomRecords,
 ) {
   const names = (d365 ?? {}) as Partial<Record<string, string>>;
   const records: Record<string, Row | null> = {
@@ -293,7 +282,9 @@ function applyMappings(
     warehouse: src.warehouse,
     carrier: src.carrier,
     invoice: src.invoice,
+    ...(custom?.header ?? {}),
   };
+  const perLineCustom = custom?.perLine ?? {};
   for (const m of mappings) {
     const field = m.field!.field_name;
     const key = resolveSourceKey(m.entity, names);
@@ -308,15 +299,19 @@ function applyMappings(
       src.lines.forEach((l, i) => {
         if (!goods[i]) return;
         const item = pick(l, ["ItemId", "ItemNumber"]);
-        const row = key === "line" ? l : key === "product" ? src.products[item] : records[key];
+        const row = key === "line" ? l : key === "product" ? src.products[item] : key in perLineCustom ? perLineCustom[key][i] : records[key];
         const qty = num(pick(l, ["Qty", "Quantity", "DeliveredQuantity", "InventQty"])) || 1;
         const v = transformValue(readProp(row, m.property, m.path), m.transform, qty);
         if (v) goods[i][prop] = v;
       });
       continue;
     }
-    if (key === "line" || key === "product") {
+    if (key === "line" || key === "product" || key in perLineCustom) {
       warnings.push(`Mapping for ${field}: line/product records can only fill goods columns (boxes 6–12).`);
+      continue;
+    }
+    if (!(key in records)) {
+      warnings.push(`Mapping for ${field}: custom entity “${key}” is not defined or inactive – ignored.`);
       continue;
     }
     const v = transformValue(readProp(records[key], m.property, m.path), m.transform);
@@ -334,6 +329,7 @@ function buildPrefill(
   userName?: string,
   mappings: D365MappingRow[] = [],
   d365?: D365Config,
+  custom?: CustomRecords,
 ): CmrPrefill {
   const values: Record<string, string> = {};
   const sources: Record<string, ValueSource> = {};
@@ -452,7 +448,7 @@ function buildPrefill(
     };
   });
   // admin mappings override the built-in mapping (fields and goods columns)
-  if (mappings.length) applyMappings(src, mappings, d365, values, sources, goods, warnings);
+  if (mappings.length) applyMappings(src, mappings, d365, values, sources, goods, warnings, custom);
 
   if (!goods.length) warnings.push("No packing slip lines were returned – add the goods manually.");
   const missingWeight = goods.filter((g) => !g.grossWeight).map((g) => g.itemNumber).filter(Boolean);
@@ -489,6 +485,9 @@ export async function probeEntities(company: string): Promise<Array<{ key: strin
     d365[m.configKey],
     m.key === "legalEntity" ? undefined : area,
   ]);
+  for (const ce of (await loadCustomEntityDefs()).filter((c) => c.active)) {
+    list.push([ce.key, `${ce.label} (custom)`, ce.entity, ce.companyFilter ? area : undefined]);
+  }
   return Promise.all(
     list.map(async ([key, label, entity, filter]) => {
       try {
